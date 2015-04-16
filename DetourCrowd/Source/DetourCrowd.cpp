@@ -206,7 +206,7 @@ static int getNeighbours(const float* pos, const float height, const float range
 		// Check for overlap.
 		float diff[3];
 		dtVsub(diff, pos, ag->npos);
-		if (dtMathFabs(diff[1]) >= (height+ag->params.height)/2.0f)
+		if (dtMathFabsf(diff[1]) >= (height+ag->params.height)/2.0f)
 			continue;
 		diff[1] = 0;
 		const float distSqr = dtVlenSqr(diff);
@@ -701,7 +701,7 @@ void dtCrowd::updateMoveRequest(const float /*dt*/)
 			dtPolyRef reqPath[MAX_RES];	// The path to the request location
 			int reqPathCount = 0;
 
-			// Quick seach towards the goal.
+			// Quick search towards the goal.
 			static const int MAX_ITER = 20;
 			m_navquery->initSlicedFindPath(path[0], ag->targetRef, ag->npos, ag->targetPos, &m_filters[ag->params.queryFilterType]);
 			m_navquery->updateSlicedFindPath(MAX_ITER, 0);
