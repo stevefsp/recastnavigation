@@ -40,10 +40,10 @@ inline int computeTileHash(int x, int y, const int mask)
 }
 
 
-struct BuildContext
+struct NavMeshTileBuildContext
 {
-	inline BuildContext(struct dtTileCacheAlloc* a) : layer(0), lcset(0), lmesh(0), alloc(a) {}
-	inline ~BuildContext() { purge(); }
+	inline NavMeshTileBuildContext(struct dtTileCacheAlloc* a) : layer(0), lcset(0), lmesh(0), alloc(a) {}
+	inline ~NavMeshTileBuildContext() { purge(); }
 	void purge()
 	{
 		dtFreeTileCacheLayer(alloc, layer);
@@ -77,6 +77,7 @@ dtTileCache::dtTileCache() :
 	m_nupdate(0)
 {
 	memset(&m_params, 0, sizeof(m_params));
+	memset(m_reqs, 0, sizeof(ObstacleRequest) * MAX_REQUESTS);
 }
 	
 dtTileCache::~dtTileCache()
@@ -350,7 +351,7 @@ dtStatus dtTileCache::removeTile(dtCompressedTileRef ref, unsigned char** data, 
 }
 
 
-dtObstacleRef dtTileCache::addObstacle(const float* pos, const float radius, const float height, dtObstacleRef* result)
+dtStatus dtTileCache::addObstacle(const float* pos, const float radius, const float height, dtObstacleRef* result)
 {
 	if (m_nreqs >= MAX_REQUESTS)
 		return DT_FAILURE | DT_BUFFER_TOO_SMALL;
@@ -384,7 +385,7 @@ dtObstacleRef dtTileCache::addObstacle(const float* pos, const float radius, con
 	return DT_SUCCESS;
 }
 
-dtObstacleRef dtTileCache::removeObstacle(const dtObstacleRef ref)
+dtStatus dtTileCache::removeObstacle(const dtObstacleRef ref)
 {
 	if (!ref)
 		return DT_SUCCESS;
@@ -440,7 +441,8 @@ dtStatus dtTileCache::queryTiles(const float* bmin, const float* bmax,
 	return DT_SUCCESS;
 }
 
-dtStatus dtTileCache::update(const float /*dt*/, dtNavMesh* navmesh)
+dtStatus dtTileCache::update(const float /*dt*/, dtNavMesh* navmesh,
+							 bool* upToDate)
 {
 	if (m_nupdate == 0)
 	{
@@ -499,12 +501,13 @@ dtStatus dtTileCache::update(const float /*dt*/, dtNavMesh* navmesh)
 		m_nreqs = 0;
 	}
 	
+	dtStatus status = DT_SUCCESS;
 	// Process updates
 	if (m_nupdate)
 	{
 		// Build mesh
 		const dtCompressedTileRef ref = m_update[0];
-		dtStatus status = buildNavMeshTile(ref, navmesh);
+		status = buildNavMeshTile(ref, navmesh);
 		m_nupdate--;
 		if (m_nupdate > 0)
 			memmove(m_update, m_update+1, m_nupdate*sizeof(dtCompressedTileRef));
@@ -547,12 +550,12 @@ dtStatus dtTileCache::update(const float /*dt*/, dtNavMesh* navmesh)
 				}
 			}
 		}
-			
-		if (dtStatusFailed(status))
-			return status;
 	}
 	
-	return DT_SUCCESS;
+	if (upToDate)
+		*upToDate = m_nupdate == 0 && m_nreqs == 0;
+
+	return status;
 }
 
 
@@ -587,7 +590,7 @@ dtStatus dtTileCache::buildNavMeshTile(const dtCompressedTileRef ref, dtNavMesh*
 	
 	m_talloc->reset();
 	
-	BuildContext bc(m_talloc);
+	NavMeshTileBuildContext bc(m_talloc);
 	const int walkableClimbVx = (int)(m_params.walkableClimb / m_params.ch);
 	dtStatus status;
 	
@@ -631,7 +634,11 @@ dtStatus dtTileCache::buildNavMeshTile(const dtCompressedTileRef ref, dtNavMesh*
 	
 	// Early out if the mesh tile is empty.
 	if (!bc.lmesh->npolys)
+	{
+		// Remove existing tile.
+		navmesh->removeTile(navmesh->getTileRefAt(tile->header->tx,tile->header->ty,tile->header->tlayer),0,0);
 		return DT_SUCCESS;
+	}
 	
 	dtNavMeshCreateParams params;
 	memset(&params, 0, sizeof(params));

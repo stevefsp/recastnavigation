@@ -24,6 +24,11 @@
 #include <new>
 #include "SDL.h"
 #include "SDL_opengl.h"
+#ifdef __APPLE__
+#	include <OpenGL/glu.h>
+#else
+#	include <GL/glu.h>
+#endif
 #include "imgui.h"
 #include "InputGeom.h"
 #include "Sample.h"
@@ -127,11 +132,11 @@ struct FastLZCompressor : public dtTileCacheCompressor
 struct LinearAllocator : public dtTileCacheAlloc
 {
 	unsigned char* buffer;
-	int capacity;
-	int top;
-	int high;
+	size_t capacity;
+	size_t top;
+	size_t high;
 	
-	LinearAllocator(const int cap) : buffer(0), capacity(0), top(0), high(0)
+	LinearAllocator(const size_t cap) : buffer(0), capacity(0), top(0), high(0)
 	{
 		resize(cap);
 	}
@@ -141,7 +146,7 @@ struct LinearAllocator : public dtTileCacheAlloc
 		dtFree(buffer);
 	}
 
-	void resize(const int cap)
+	void resize(const size_t cap)
 	{
 		if (buffer) dtFree(buffer);
 		buffer = (unsigned char*)dtAlloc(cap, DT_ALLOC_PERM);
@@ -154,7 +159,7 @@ struct LinearAllocator : public dtTileCacheAlloc
 		top = 0;
 	}
 	
-	virtual void* alloc(const int size)
+	virtual void* alloc(const size_t size)
 	{
 		if (!buffer)
 			return 0;
@@ -348,7 +353,8 @@ static int rasterizeTileLayers(BuildContext* ctx, InputGeom* geom,
 		rcMarkWalkableTriangles(ctx, tcfg.walkableSlopeAngle,
 								verts, nverts, tris, ntris, rc.triareas);
 		
-		rcRasterizeTriangles(ctx, verts, nverts, tris, rc.triareas, ntris, *rc.solid, tcfg.walkableClimb);
+		if (!rcRasterizeTriangles(ctx, verts, nverts, tris, rc.triareas, ntris, *rc.solid, tcfg.walkableClimb))
+			return 0;
 	}
 	
 	// Once all geometry is rasterized, we do initial pass of filtering to
@@ -666,7 +672,6 @@ class TempObstacleHilightTool : public SampleTool
 	Sample_TempObstacles* m_sample;
 	float m_hitPos[3];
 	bool m_hitPosSet;
-	float m_agentRadius;
 	int m_drawType;
 	
 public:
@@ -674,7 +679,6 @@ public:
 	TempObstacleHilightTool() :
 		m_sample(0),
 		m_hitPosSet(false),
-		m_agentRadius(0),
 		m_drawType(DRAWDETAIL_AREAS)
 	{
 		m_hitPos[0] = m_hitPos[1] = m_hitPos[2] = 0;
@@ -722,7 +726,7 @@ public:
 	
 	virtual void handleRender()
 	{
-		if (m_hitPosSet)
+		if (m_hitPosSet && m_sample)
 		{
 			const float s = m_sample->getAgentRadius();
 			glColor4ub(0,0,0,128);
@@ -736,14 +740,10 @@ public:
 			glVertex3f(m_hitPos[0],m_hitPos[1]+0.1f,m_hitPos[2]+s);
 			glEnd();
 			glLineWidth(1.0f);
-			
-			if (m_sample)
-			{
-				int tx=0, ty=0;
-				m_sample->getTilePos(m_hitPos, tx, ty);
-				m_sample->renderCachedTile(tx,ty,m_drawType);
-			}
 
+			int tx=0, ty=0;
+			m_sample->getTilePos(m_hitPos, tx, ty);
+			m_sample->renderCachedTile(tx,ty,m_drawType);
 		}
 	}
 	
@@ -862,8 +862,8 @@ void Sample_TempObstacles::handleSettings()
 	int gridSize = 1;
 	if (m_geom)
 	{
-		const float* bmin = m_geom->getMeshBoundsMin();
-		const float* bmax = m_geom->getMeshBoundsMax();
+		const float* bmin = m_geom->getNavMeshBoundsMin();
+		const float* bmax = m_geom->getNavMeshBoundsMax();
 		char text[64];
 		int gw = 0, gh = 0;
 		rcCalcGridSize(bmin, bmax, m_cellSize, &gw, &gh);
@@ -1055,8 +1055,8 @@ void Sample_TempObstacles::handleRender()
 	glDepthMask(GL_FALSE);
 	
 	// Draw bounds
-	const float* bmin = m_geom->getMeshBoundsMin();
-	const float* bmax = m_geom->getMeshBoundsMax();
+	const float* bmin = m_geom->getNavMeshBoundsMin();
+	const float* bmax = m_geom->getNavMeshBoundsMax();
 	duDebugDrawBoxWire(&dd, bmin[0],bmin[1],bmin[2], bmax[0],bmax[1],bmax[2], duRGBA(255,255,255,128), 1.0f);
 	
 	// Tiling grid.
@@ -1204,8 +1204,8 @@ bool Sample_TempObstacles::handleBuild()
 	m_tmproc->init(m_geom);
 	
 	// Init cache
-	const float* bmin = m_geom->getMeshBoundsMin();
-	const float* bmax = m_geom->getMeshBoundsMax();
+	const float* bmin = m_geom->getNavMeshBoundsMin();
+	const float* bmax = m_geom->getNavMeshBoundsMax();
 	int gw = 0, gh = 0;
 	rcCalcGridSize(bmin, bmax, m_cellSize, &gw, &gh);
 	const int ts = (int)m_tileSize;
@@ -1276,7 +1276,7 @@ bool Sample_TempObstacles::handleBuild()
 
 	dtNavMeshParams params;
 	memset(&params, 0, sizeof(params));
-	rcVcopy(params.orig, m_geom->getMeshBoundsMin());
+	rcVcopy(params.orig, bmin);
 	params.tileWidth = m_tileSize*m_cellSize;
 	params.tileHeight = m_tileSize*m_cellSize;
 	params.maxTiles = m_maxTiles;
@@ -1376,7 +1376,7 @@ void Sample_TempObstacles::getTilePos(const float* pos, int& tx, int& ty)
 {
 	if (!m_geom) return;
 	
-	const float* bmin = m_geom->getMeshBoundsMin();
+	const float* bmin = m_geom->getNavMeshBoundsMin();
 	
 	const float ts = m_tileSize*m_cellSize;
 	tx = (int)((pos[0] - bmin[0]) / ts);

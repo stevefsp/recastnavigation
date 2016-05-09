@@ -16,38 +16,41 @@
 // 3. This notice may not be removed or altered from any source distribution.
 //
 
-#ifndef SLIDESHOW_H
-#define SLIDESHOW_H
+#ifndef NAVMESHPRUNETOOL_H
+#define NAVMESHPRUNETOOL_H
 
-#include "Filelist.h"
+#include "Sample.h"
 
-class SlideShow
+// Prune navmesh to accessible locations from a point.
+
+class NavMeshPruneTool : public SampleTool
 {
-	FileList m_files;
-	char m_path[256];
+	Sample* m_sample;
+	
+	class NavmeshFlags* m_flags;
 
-	int m_width;
-	int m_height;
-	unsigned int m_texId;
-
-	void purgeImage();
-	bool loadImage(const char* path);
-
-	bool m_showSlides;
-	bool m_showCurSlide;
-	float m_slideAlpha;
-	int m_curSlide;
-	int m_nextSlide;
+	float m_hitPos[3];
+	bool m_hitPosSet;
 	
 public:
-	SlideShow();
-	~SlideShow();
+	NavMeshPruneTool();
+	virtual ~NavMeshPruneTool();
+	
+	virtual int type() { return TOOL_NAVMESH_PRUNE; }
+	virtual void init(Sample* sample);
+	virtual void reset();
+	virtual void handleMenu();
+	virtual void handleClick(const float* s, const float* p, bool shift);
+	virtual void handleToggle();
+	virtual void handleStep();
+	virtual void handleUpdate(const float dt);
+	virtual void handleRender();
+	virtual void handleRenderOverlay(double* proj, double* model, int* view);
 
-	bool init(const char* path);
-	void nextSlide();
-	void prevSlide();
-	void setSlide(int n);
-	void updateAndDraw(float dt, const float w, const float h);
+private:
+	// Explicitly disabled copy constructor and copy assignment operator.
+	NavMeshPruneTool(const NavMeshPruneTool&);
+	NavMeshPruneTool& operator=(const NavMeshPruneTool&);
 };
 
-#endif // SLIDESHOW_H
+#endif // NAVMESHPRUNETOOL_H
